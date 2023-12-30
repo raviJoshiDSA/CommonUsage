@@ -1,0 +1,174 @@
+package Test;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.util.CellRangeAddress;
+
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class ExcelExporter {
+
+    public static void exportToExcel(List<Object> data, List<String> headingMessages, String filePath, boolean includeTotal, List<Integer> columnsForTotal) {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Sheet1");
+
+            int currentRowNum = writeHeadingMessages(sheet, headingMessages, data);
+            List<String> headers = generateHeaders(data);
+            writeHeaders(sheet, currentRowNum++, headers);
+
+            int sno = 1;
+            for (Object rowData : data) {
+                Row row = sheet.createRow(currentRowNum++);
+                row.createCell(0).setCellValue(sno++);
+                writeDataCells(row, rowData);
+            }
+
+            if (includeTotal) {
+                currentRowNum = writeTotalRow(sheet, currentRowNum, columnsForTotal);
+            }
+
+            try (FileOutputStream fileOut = new FileOutputStream(filePath)) {
+                workbook.write(fileOut);
+                System.out.println("Excel file created successfully at: " + filePath);
+            }
+        } catch (IOException | IllegalAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static int writeHeadingMessages(Sheet sheet, List<String> headingMessages, List<Object> data) {
+        CellStyle boldStyle = createBoldStyle(sheet.getWorkbook());
+        int currentRowNum = 0;
+
+        for (String headingMessage : headingMessages) {
+            Row headingRow = sheet.createRow(currentRowNum++);
+            Cell headingCell = headingRow.createCell(0);
+            headingCell.setCellValue(headingMessage.toUpperCase());
+            sheet.addMergedRegion(new CellRangeAddress(
+                    headingRow.getRowNum(), headingRow.getRowNum(), 0, data.get(0).getClass().getDeclaredFields().length));
+            headingCell.setCellStyle(boldStyle);
+        }
+
+        return currentRowNum;
+    }
+
+    private static CellStyle createBoldStyle(Workbook workbook) {
+        CellStyle boldStyle = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        boldStyle.setFont(font);
+        return boldStyle;
+    }
+
+    private static List<String> generateHeaders(List<Object> data) {
+        if (data.isEmpty()) {
+            return List.of();
+        }
+
+        Field[] fields = data.get(0).getClass().getDeclaredFields();
+        return Arrays.stream(fields)
+                .map(Field::getName)
+                .collect(Collectors.toList());
+    }
+
+    private static void writeHeaders(Sheet sheet, int rowNum, List<String> headers) {
+        CellStyle boldStyle = createBoldStyle(sheet.getWorkbook());
+
+        Row headerRow = sheet.createRow(rowNum);
+        headerRow.createCell(0).setCellValue("SNO");
+        for (int i = 1; i <= headers.size(); i++) {
+            Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers.get(i - 1).toUpperCase());
+            cell.setCellStyle(boldStyle);
+        }
+    }
+
+    private static void writeDataCells(Row row, Object rowData) throws IllegalAccessException {
+        Field[] fields = rowData.getClass().getDeclaredFields();
+        for (int i = 0; i < fields.length; i++) {
+            fields[i].setAccessible(true);
+            Cell cell = row.createCell(i + 1);
+            setCellValue(cell, fields[i].get(rowData));
+        }
+    }
+
+    private static int writeTotalRow(Sheet sheet, int rowNum, List<Integer> columnsForTotal) {
+        CellStyle boldStyle = createBoldStyle(sheet.getWorkbook());
+
+        Row totalRow = sheet.createRow(rowNum++);
+        Cell totalLabelCell = totalRow.createCell(0);
+        totalLabelCell.setCellValue("Total");
+        totalLabelCell.setCellStyle(boldStyle);
+
+        for (Integer columnIndex : columnsForTotal) {
+            double totalValue = calculateTotal(sheet, columnIndex + 1);
+            Cell totalValueCell = totalRow.createCell(columnIndex + 1);
+            totalValueCell.setCellValue(totalValue);
+            totalValueCell.setCellStyle(boldStyle);
+        }
+
+        return rowNum;
+    }
+
+    private static void setCellValue(Cell cell, Object value) {
+        if (value == null) {
+            cell.setBlank();
+        } else if (value instanceof String) {
+            cell.setCellValue(((String) value).toUpperCase());
+        } else if (value instanceof Number) {
+            cell.setCellValue(((Number) value).doubleValue());
+        } else if (value instanceof Boolean) {
+            cell.setCellValue((Boolean) value);
+        } else if (value instanceof java.util.Date) {
+            cell.setCellValue((java.util.Date) value);
+        } else if (value instanceof java.util.Calendar) {
+            cell.setCellValue((java.util.Calendar) value);
+        } else {
+            throw new IllegalArgumentException("Unsupported data type: " + value.getClass());
+        }
+    }
+
+    private static double calculateTotal(Sheet sheet, int columnIndex) {
+        double total = 0;
+        for (Row row : sheet) {
+            Cell cell = row.getCell(columnIndex);
+            if (cell != null && cell.getCellType() == CellType.NUMERIC) {
+                total += cell.getNumericCellValue();
+            }
+        }
+        return total;
+    }
+
+    public static void main(String[] args) {
+        List<String> headingMessages = List.of(
+                "This is heading message 1",
+                "This is heading message 2",
+                "This is heading message 3"
+        );
+
+        List<Object> data = new ArrayList<>();
+        data.add(new Person("John Doe", 30, "USA"));
+        data.add(new Person("Jane Smith", 25, "Canada"));
+        data.add(new Person("Bob Johnson", 40, "UK"));
+
+        List<Integer> columnsForTotal = List.of(1);
+        exportToExcel(data, headingMessages, "D://example.xlsx", false, columnsForTotal);
+    }
+}
+
+class Person {
+    private String name;
+    private int age;
+    private String country;
+
+    public Person(String name, int age, String country) {
+        this.name = name;
+        this.age = age;
+        this.country = country;
+    }
+}
